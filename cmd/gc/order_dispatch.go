@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/events"
+	"github.com/gastownhall/gascity/internal/execenv"
 	"github.com/gastownhall/gascity/internal/formula"
 	"github.com/gastownhall/gascity/internal/molecule"
 	"github.com/gastownhall/gascity/internal/orders"
@@ -56,7 +58,7 @@ func mergeOrderExecEnv(environ, env []string) []string {
 }
 
 func logDispatchError(stderr io.Writer, format string, args ...any) {
-	msg := fmt.Sprintf(format, args...)
+	msg := execenv.RedactText(fmt.Sprintf(format, args...), os.Environ())
 	log.Print(msg)
 	if stderr != nil {
 		fmt.Fprintln(stderr, msg) //nolint:errcheck // best-effort stderr
@@ -342,16 +344,18 @@ func (m *memoryOrderDispatcher) dispatchExec(ctx context.Context, store beads.St
 	env := orderExecEnv(cityPath, m.cfg, target, a)
 	output, err := m.execRun(ctx, a.Exec, target.ScopeRoot, env)
 	if err != nil {
+		redactionEnv := append(os.Environ(), env...)
+		errMsg := execenv.RedactText(err.Error(), redactionEnv)
 		labels = append(labels, "exec-failed")
-		logDispatchError(m.stderr, "gc: order exec %s failed: %v", scoped, err)
+		logDispatchError(m.stderr, "gc: order exec %s failed: %s", scoped, errMsg)
 		if len(output) > 0 {
-			logDispatchError(m.stderr, "gc: order exec %s output: %s", scoped, output)
+			logDispatchError(m.stderr, "gc: order exec %s output: %s", scoped, execenv.RedactText(string(output), redactionEnv))
 		}
 		m.rec.Record(events.Event{
 			Type:    events.OrderFailed,
 			Actor:   "controller",
 			Subject: scoped,
-			Message: err.Error(),
+			Message: errMsg,
 		})
 	} else {
 		m.rec.Record(events.Event{

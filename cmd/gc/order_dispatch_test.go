@@ -791,6 +791,53 @@ func TestOrderDispatchExecFailure(t *testing.T) {
 	}
 }
 
+func TestOrderDispatchExecFailureRedactsSecrets(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "ghs_order_secret")
+	store := beads.NewMemStore()
+	var rec memRecorder
+	var stderr bytes.Buffer
+	tracking, err := store.Create(beads.Bead{
+		Title:  "order:leaky-exec",
+		Labels: []string{"order-run:leaky-exec", labelOrderTracking},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fakeExec := func(_ context.Context, _, _ string, _ []string) ([]byte, error) {
+		return []byte("GITHUB_TOKEN=ghs_order_secret\n--password hunter2\n"), fmt.Errorf("token=ghs_order_secret password=hunter2")
+	}
+
+	aa := []orders.Order{{
+		Name:     "leaky-exec",
+		Trigger:  "cooldown",
+		Interval: "2m",
+		Exec:     "scripts/fail.sh",
+	}}
+	ad := buildOrderDispatcherFromListExec(aa, store, nil, fakeExec, &rec)
+	mad := ad.(*memoryOrderDispatcher)
+	mad.stderr = &stderr
+
+	logs := captureCmdOrderLogs(t, func() {
+		mad.dispatchExec(context.Background(), store, execStoreTarget{ScopeRoot: t.TempDir()}, aa[0], t.TempDir(), tracking.ID)
+	})
+
+	combined := logs + "\n" + stderr.String()
+	for _, secret := range []string{"ghs_order_secret", "hunter2"} {
+		if strings.Contains(combined, secret) {
+			t.Fatalf("order exec logs leaked %q:\n%s", secret, combined)
+		}
+	}
+	if !strings.Contains(combined, "[redacted]") {
+		t.Fatalf("order exec logs = %q, want redaction marker", combined)
+	}
+	for _, event := range rec.events {
+		if strings.Contains(event.Message, "ghs_order_secret") || strings.Contains(event.Message, "hunter2") {
+			t.Fatalf("order failed event leaked secret: %#v", event)
+		}
+	}
+}
+
 func TestOrderDispatchFormulaCookFailureLabelsTrackingBead(t *testing.T) {
 	store := beads.NewMemStore()
 	var rec memRecorder

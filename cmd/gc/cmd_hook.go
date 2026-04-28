@@ -203,9 +203,7 @@ func shellWorkQueryWithEnv(command, dir string, env []string) (string, error) {
 	if dir != "" {
 		cmd.Dir = dir
 	}
-	if env != nil {
-		cmd.Env = workQueryEnvForDir(env, dir)
-	}
+	cmd.Env = workQueryEnvForDir(env, dir)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("running work query %q: %w", command, err)
@@ -220,7 +218,7 @@ func shellWorkQueryWithEnv(command, dir string, env []string) (string, error) {
 // that inspect $PWD.
 func workQueryEnvForDir(env []string, dir string) []string {
 	if env == nil {
-		return nil
+		env = mergeRuntimeEnv(os.Environ(), nil)
 	}
 	if dir == "" {
 		return env
