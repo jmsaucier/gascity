@@ -37,6 +37,7 @@ gc [flags]
 | [gc handoff](#gc-handoff) | Send handoff mail and restart controller-managed sessions |
 | [gc help](#gc-help) | Help about any command |
 | [gc hook](#gc-hook) | Check for available work (use --inject for Stop hook output) |
+| [gc hook reset](#gc-hook-reset) | Remove and reinstall provider hook files for an agent |
 | [gc import](#gc-import) | Manage pack imports |
 | [gc init](#gc-init) | Initialize a new city |
 | [gc mail](#gc-mail) | Send and receive messages between agents and humans |
@@ -1131,6 +1132,10 @@ With --inject: wraps output in &lt;system-reminder&gt; for hook injection, alway
 
 		The agent is determined from $GC_AGENT or a positional argument.
 
+| Subcommand | Description |
+|------------|-------------|
+| [gc hook reset](#gc-hook-reset) | Remove and reinstall Gas City provider hook files for an agent |
+
 ```
 gc hook [agent] [flags]
 ```
@@ -1139,6 +1144,45 @@ gc hook [agent] [flags]
 |------|------|---------|-------------|
 | `--hook-format` | string |  | format hook output for a provider |
 | `--inject` | bool |  | output &lt;system-reminder&gt; block for hook injection |
+
+## gc hook reset
+
+Removes Gas City–managed hook artifacts for the named agent’s
+`install_agent_hooks` list (workspace or per-agent), then reinstalls them from
+the embedded pack—the same files the controller would write via
+`hooks.InstallWithResolver`.
+
+- **Overlay providers** (codex, gemini, cursor, copilot, opencode, pi, omp):
+  deletes the pack overlay files under that agent’s resolved **work
+  directory** (same path as `prepareTemplateResolution` / the reconciler, not
+  necessarily the directory used for `work_query` shell commands). For **pi**,
+  after reinstall the hook also verifies `work_dir/.pi/extensions/gc-hooks.js`
+  matches the embedded core overlay
+  `internal/bootstrap/packs/core/overlay/per-provider/pi/` byte-for-byte.
+- **Claude**: deletes only `&lt;city&gt;/.gc/settings.json`. User-authored
+  `.claude/settings.json` and `hooks/claude.json` are **not** removed; the next
+  install merges them again.
+
+Uses `install_agent_hooks` from city.toml (workspace or per-agent) unless you
+pass **`--hook-providers`** (comma-separated), which **overrides** that list for
+this run—useful when hooks are not declared in config yet, e.g.
+`gc hook reset my-agent --hook-providers=pi`.
+
+If the positional argument is a known hook provider name (e.g. `pi`) but not an
+agent, the command errors with a hint; with `GC_AGENT` set it suggests
+`gc hook reset $GC_AGENT --hook-providers=pi`.
+
+If an agent is literally named `reset`, set `GC_AGENT` or `GC_ALIAS` and run
+`gc hook reset` with no positional argument so the name is not parsed as this
+subcommand.
+
+```
+gc hook reset [agent] [flags]
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--hook-providers` | stringSlice |  | comma-separated provider names to reinstall (e.g. `pi,codex`); overrides `install_agent_hooks` for this run |
 
 ## gc import
 

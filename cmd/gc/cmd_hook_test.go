@@ -734,3 +734,224 @@ func TestDoHookNormalizesSingleObjectOutputToArray(t *testing.T) {
 		t.Fatalf("stdout = %q, want normalized JSON array", got)
 	}
 }
+
+func TestHookResetReinstallsPiHooks(t *testing.T) {
+	clearGCEnv(t)
+	cityDir := t.TempDir()
+	wk := filepath.Join(cityDir, "wk")
+	if err := os.MkdirAll(filepath.Join(cityDir, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(wk, ".pi", "extensions"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wk, ".pi", "extensions", "gc-hooks.js"), []byte(`module.exports = () => {};`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cityToml := `[workspace]
+name = "test-city"
+
+[[agent]]
+name = "worker"
+work_query = "true"
+work_dir = "wk"
+install_agent_hooks = ["pi"]
+`
+	if err := os.WriteFile(filepath.Join(cityDir, "city.toml"), []byte(cityToml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GC_CITY", cityDir)
+
+	var stdout, stderr bytes.Buffer
+	cmd := newHookCmd(&stdout, &stderr)
+	cmd.SetArgs([]string{"reset", "worker"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("gc hook reset: %v; stderr=%s", err, stderr.String())
+	}
+	data, err := os.ReadFile(filepath.Join(wk, ".pi", "extensions", "gc-hooks.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	if !strings.Contains(s, "Gas City hooks for Pi Coding Agent") || !strings.Contains(s, `pi.on("session_start"`) {
+		t.Fatalf("expected embedded Pi overlay content, got:\n%s", s)
+	}
+}
+
+func TestHookResetReinstallsCodexHooks(t *testing.T) {
+	clearGCEnv(t)
+	cityDir := t.TempDir()
+	wk := filepath.Join(cityDir, "wk")
+	if err := os.MkdirAll(filepath.Join(cityDir, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(wk, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	codexHooks := filepath.Join(wk, ".codex")
+	if err := os.MkdirAll(codexHooks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(codexHooks, "hooks.json"), []byte(`{"hooks":{}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cityToml := `[workspace]
+name = "test-city"
+
+[[agent]]
+name = "worker"
+work_query = "true"
+work_dir = "wk"
+install_agent_hooks = ["codex"]
+`
+	if err := os.WriteFile(filepath.Join(cityDir, "city.toml"), []byte(cityToml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GC_CITY", cityDir)
+
+	var stdout, stderr bytes.Buffer
+	cmd := newHookCmd(&stdout, &stderr)
+	cmd.SetArgs([]string{"reset", "worker"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("gc hook reset: %v; stderr=%s", err, stderr.String())
+	}
+	data, err := os.ReadFile(filepath.Join(codexHooks, "hooks.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "gc prime --hook") {
+		t.Fatalf("expected reinstalled codex hooks, got:\n%s", string(data))
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "worker") || !strings.Contains(out, "codex") {
+		t.Fatalf("stdout = %q, want agent and codex mention", out)
+	}
+}
+
+func TestHookResetFailsWithoutInstallAgentHooks(t *testing.T) {
+	clearGCEnv(t)
+	cityDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cityDir, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cityToml := `[workspace]
+name = "test-city"
+
+[[agent]]
+name = "worker"
+work_query = "true"
+`
+	if err := os.WriteFile(filepath.Join(cityDir, "city.toml"), []byte(cityToml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GC_CITY", cityDir)
+	var stdout, stderr bytes.Buffer
+	cmd := newHookCmd(&stdout, &stderr)
+	cmd.SetArgs([]string{"reset", "worker"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error exit")
+	}
+	errOut := stderr.String()
+	if !strings.Contains(errOut, "install_agent_hooks") || !strings.Contains(errOut, "--hook-providers") {
+		t.Fatalf("stderr = %q, want install_agent_hooks and --hook-providers hint", errOut)
+	}
+}
+
+func TestHookResetHookProvidersWithoutInstallAgentHooks(t *testing.T) {
+	clearGCEnv(t)
+	cityDir := t.TempDir()
+	wk := filepath.Join(cityDir, "wk")
+	if err := os.MkdirAll(filepath.Join(cityDir, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(wk, ".pi", "extensions"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wk, ".pi", "extensions", "gc-hooks.js"), []byte(`stale`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cityToml := `[workspace]
+name = "test-city"
+
+[[agent]]
+name = "worker"
+work_query = "true"
+work_dir = "wk"
+`
+	if err := os.WriteFile(filepath.Join(cityDir, "city.toml"), []byte(cityToml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GC_CITY", cityDir)
+	var stdout, stderr bytes.Buffer
+	cmd := newHookCmd(&stdout, &stderr)
+	cmd.SetArgs([]string{"reset", "worker", "--hook-providers=pi"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("gc hook reset: %v; stderr=%s", err, stderr.String())
+	}
+	data, err := os.ReadFile(filepath.Join(wk, ".pi", "extensions", "gc-hooks.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "Gas City hooks for Pi Coding Agent") {
+		t.Fatalf("expected Pi overlay after --hook-providers, got:\n%s", string(data))
+	}
+}
+
+func TestHookResetPositionalProviderNameHintsEnvAgent(t *testing.T) {
+	clearGCEnv(t)
+	cityDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cityDir, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cityToml := `[workspace]
+name = "test-city"
+
+[[agent]]
+name = "worker"
+work_query = "true"
+`
+	if err := os.WriteFile(filepath.Join(cityDir, "city.toml"), []byte(cityToml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GC_CITY", cityDir)
+	t.Setenv("GC_AGENT", "worker")
+	var stdout, stderr bytes.Buffer
+	cmd := newHookCmd(&stdout, &stderr)
+	cmd.SetArgs([]string{"reset", "pi"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error exit")
+	}
+	if !strings.Contains(stderr.String(), "hook provider name") || !strings.Contains(stderr.String(), "gc hook reset worker --hook-providers=pi") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestHookCommandStillRunsWorkQueryNotReset(t *testing.T) {
+	clearGCEnv(t)
+	cityDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cityDir, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cityToml := `[workspace]
+name = "test-city"
+
+[[agent]]
+name = "worker"
+work_query = "echo work"
+`
+	if err := os.WriteFile(filepath.Join(cityDir, "city.toml"), []byte(cityToml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GC_CITY", cityDir)
+	var stdout, stderr bytes.Buffer
+	cmd := newHookCmd(&stdout, &stderr)
+	cmd.SetArgs([]string{"worker"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("gc hook worker: %v; stderr=%s", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "work") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+}

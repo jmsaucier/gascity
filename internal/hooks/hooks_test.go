@@ -889,6 +889,106 @@ func TestInstallUnknownProvider(t *testing.T) {
 	}
 }
 
+func TestResetAndInstallPiMatchesEmbeddedOverlay(t *testing.T) {
+	fs := fsys.NewFake()
+	if err := Install(fs, "/city", "/work", []string{"pi"}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	p := "/work/.pi/extensions/gc-hooks.js"
+	fs.Files[p] = []byte(`module.exports = () => {};`)
+
+	if err := ResetAndInstallWithResolver(fs, "/city", "/work", []string{"pi"}, nil); err != nil {
+		t.Fatalf("ResetAndInstallWithResolver: %v", err)
+	}
+	data := string(fs.Files[p])
+	for _, want := range []string{
+		"Gas City hooks for Pi Coding Agent",
+		`pi.on("session_start"`,
+		`pi.on("before_agent_start"`,
+	} {
+		if !strings.Contains(data, want) {
+			t.Errorf("restored Pi hook missing %q:\n%s", want, data)
+		}
+	}
+}
+
+func TestResetAndInstallPiDedupedInProviderList(t *testing.T) {
+	fs := fsys.NewFake()
+	if err := ResetAndInstallWithResolver(fs, "/city", "/work", []string{"pi", "pi"}, nil); err != nil {
+		t.Fatalf("ResetAndInstallWithResolver: %v", err)
+	}
+	if _, ok := fs.Files["/work/.pi/extensions/gc-hooks.js"]; !ok {
+		t.Fatal("expected Pi gc-hooks.js after reset with duplicate pi entries")
+	}
+}
+
+func TestResetAndInstallCodexRemovesStaleAndRestores(t *testing.T) {
+	fs := fsys.NewFake()
+	if err := Install(fs, "/city", "/work", []string{"codex"}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	p := "/work/.codex/hooks.json"
+	if _, ok := fs.Files[p]; !ok {
+		t.Fatal("expected codex hooks.json after Install")
+	}
+	fs.Files[p] = []byte(`{"hooks":{}}`)
+
+	if err := ResetAndInstallWithResolver(fs, "/city", "/work", []string{"codex"}, nil); err != nil {
+		t.Fatalf("ResetAndInstallWithResolver: %v", err)
+	}
+	got := string(fs.Files[p])
+	if !strings.Contains(got, "gc prime --hook") {
+		t.Errorf("restored codex hooks should contain gc prime --hook, got:\n%s", got)
+	}
+}
+
+func TestResetAndInstallClaudeRestoresRuntimeSettings(t *testing.T) {
+	fs := fsys.NewFake()
+	if err := Install(fs, "/city", "/work", []string{"claude"}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	fs.Files["/city/.gc/settings.json"] = []byte(`{"hooks":{}}`)
+
+	if err := ResetAndInstallWithResolver(fs, "/city", "/work", []string{"claude"}, nil); err != nil {
+		t.Fatalf("ResetAndInstallWithResolver: %v", err)
+	}
+	data := fs.Files["/city/.gc/settings.json"]
+	if !strings.Contains(string(data), "SessionStart") {
+		t.Fatalf("expected SessionStart in restored settings, got:\n%s", string(data))
+	}
+	sessionStartCommand := claudeHookCommand(t, data, "SessionStart")
+	if !strings.Contains(sessionStartCommand, "gc prime --hook") {
+		t.Errorf("SessionStart should contain gc prime --hook: %s", sessionStartCommand)
+	}
+}
+
+func TestResetAndInstallCodexIdempotent(t *testing.T) {
+	fs := fsys.NewFake()
+	if err := Install(fs, "/city", "/work", []string{"codex"}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	first := string(fs.Files["/work/.codex/hooks.json"])
+	for i := 0; i < 3; i++ {
+		if err := ResetAndInstallWithResolver(fs, "/city", "/work", []string{"codex"}, nil); err != nil {
+			t.Fatalf("iteration %d: %v", i, err)
+		}
+	}
+	if got := string(fs.Files["/work/.codex/hooks.json"]); got != first {
+		t.Errorf("content changed after idempotent resets:\nfirst len=%d got len=%d", len(first), len(got))
+	}
+}
+
+func TestResetAndInstallRejectsUnsupportedProvider(t *testing.T) {
+	fs := fsys.NewFake()
+	err := ResetAndInstallWithResolver(fs, "/city", "/work", []string{"bogus"}, nil)
+	if err == nil {
+		t.Fatal("expected error for bogus provider")
+	}
+	if !strings.Contains(err.Error(), "unsupported") {
+		t.Errorf("error = %v, want unsupported mention", err)
+	}
+}
+
 // TestSupportsHooksSyncWithProviderSpec verifies that the hooks supported list
 // stays in sync with ProviderSpec.SupportsHooks across all builtin providers.
 func TestSupportsHooksSyncWithProviderSpec(t *testing.T) {

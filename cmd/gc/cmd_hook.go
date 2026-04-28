@@ -37,22 +37,18 @@ With --inject: wraps output in <system-reminder> for hook injection, always exit
 	}
 	cmd.Flags().BoolVar(&inject, "inject", false, "output <system-reminder> block for hook injection")
 	cmd.Flags().StringVar(&hookFormat, "hook-format", "", "format hook output for a provider")
+	cmd.AddCommand(newHookResetCmd(stdout, stderr))
 	return cmd
 }
 
-// cmdHook is the CLI entry point for gc hook. Resolves the agent from
-// $GC_AGENT or a positional argument, loads the city config, and runs
-// the agent's work query.
-func cmdHook(args []string, stdout, stderr io.Writer) int {
-	return cmdHookWithFormat(args, false, "", stdout, stderr)
-}
-
-func cmdHookWithFormat(args []string, inject bool, hookFormat string, stdout, stderr io.Writer) int {
-	agentName := os.Getenv("GC_ALIAS")
+// hookCLIAgentFromArgs resolves the agent name for gc hook and gc hook reset.
+// When len(args) > 0, args[0] is the agent name. Otherwise uses GC_ALIAS,
+// GC_AGENT, or GC_TEMPLATE with session context (same rules as cmdHookWithFormat).
+func hookCLIAgentFromArgs(args []string) (agentName string, sessionTemplateContext bool) {
+	agentName = os.Getenv("GC_ALIAS")
 	if agentName == "" {
 		agentName = os.Getenv("GC_AGENT")
 	}
-	sessionTemplateContext := false
 	if len(args) == 0 {
 		template := strings.TrimSpace(os.Getenv("GC_TEMPLATE"))
 		hasSessionContext := strings.TrimSpace(os.Getenv("GC_SESSION_NAME")) != "" ||
@@ -64,7 +60,20 @@ func cmdHookWithFormat(args []string, inject bool, hookFormat string, stdout, st
 	}
 	if len(args) > 0 {
 		agentName = args[0]
+		sessionTemplateContext = false
 	}
+	return agentName, sessionTemplateContext
+}
+
+// cmdHook is the CLI entry point for gc hook. Resolves the agent from
+// $GC_AGENT or a positional argument, loads the city config, and runs
+// the agent's work query.
+func cmdHook(args []string, stdout, stderr io.Writer) int {
+	return cmdHookWithFormat(args, false, "", stdout, stderr)
+}
+
+func cmdHookWithFormat(args []string, inject bool, hookFormat string, stdout, stderr io.Writer) int {
+	agentName, sessionTemplateContext := hookCLIAgentFromArgs(args)
 	if agentName == "" {
 		if inject {
 			return 0 // --inject always exits 0

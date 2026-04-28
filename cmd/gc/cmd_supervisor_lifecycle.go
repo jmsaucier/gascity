@@ -405,6 +405,7 @@ var providerCredentialEnvPrefixes = []string{
 	"GEMINI_",
 	"GOOGLE_",
 	"OPENAI_",
+	"OLLAMA_",
 }
 
 var supervisorServiceFixedEnvKeys = map[string]bool{
