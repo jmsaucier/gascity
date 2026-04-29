@@ -1159,6 +1159,17 @@ the embedded pack—the same files the controller would write via
   after reinstall the hook also verifies `work_dir/.pi/extensions/gc-hooks.js`
   matches the embedded core overlay
   `internal/bootstrap/packs/core/overlay/per-provider/pi/` byte-for-byte.
+  For **pi** only, the command then merges `$HOME/.pi` into `work_dir/.pi`
+  (deep-merge for `.json` files so global Pi settings/models land in the agent
+  tree; copy other files). `extensions/gc-hooks.js` is never taken from the home
+  tree; `agent/sessions` under `$HOME/.pi` is skipped.
+  **`--all-agents`** runs the same reset for every non-implicit agent in
+  `city.toml` (city-scoped and rig-scoped via `dir = "rig-name"`): only agents whose
+  effective `install_agent_hooks` includes **pi** are selected, unless
+  `--hook-providers` is set—in which case that list is used for **every** agent
+  (use `--hook-providers=pi` to push Pi hooks into all agent work directories).
+  Each agent’s resolved `work_dir` is used; bounded pools get one pass per
+  instance directory (same discovery as other pool-aware commands).
 - **Claude**: deletes only `&lt;city&gt;/.gc/settings.json`. User-authored
   `.claude/settings.json` and `hooks/claude.json` are **not** removed; the next
   install merges them again.
@@ -1183,6 +1194,7 @@ gc hook reset [agent] [flags]
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--hook-providers` | stringSlice |  | comma-separated provider names to reinstall (e.g. `pi,codex`); overrides `install_agent_hooks` for this run |
+| `--all-agents` | bool | `false` | reinstall hooks for every configured agent (see bullets above); do not pass a positional agent name |
 
 ## gc import
 

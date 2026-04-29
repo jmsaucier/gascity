@@ -27,11 +27,18 @@ import (
 // When any resolved provider family is "pi", the installed
 // .pi/extensions/gc-hooks.js must match the embedded core overlay byte-for-byte
 // after reinstall (Pi has a single overlay file; this catches drift or partial writes).
+//
+// For pi, after the overlay install, files under $HOME/.pi are merged into
+// workDir/.pi (see mergeUserPiIntoWorkDir) so project-local Pi config matches
+// the user's global ~/.pi tree except for Gas City–managed gc-hooks.js.
 func ResetAndInstallWithResolver(fs fsys.FS, cityDir, workDir string, providers []string, resolve FamilyResolver) error {
 	if err := removeManagedHookFiles(fs, cityDir, workDir, providers, resolve); err != nil {
 		return err
 	}
 	if err := InstallWithResolver(fs, cityDir, workDir, providers, resolve); err != nil {
+		return err
+	}
+	if err := mergeUserPiAfterPiHookReset(fs, workDir, providers, resolve); err != nil {
 		return err
 	}
 	piSeen := false
@@ -43,6 +50,26 @@ func ResetAndInstallWithResolver(fs fsys.FS, cityDir, workDir string, providers 
 		if err := verifyPiOverlayInstalled(fs, workDir); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func mergeUserPiAfterPiHookReset(fs fsys.FS, workDir string, providers []string, resolve FamilyResolver) error {
+	piSeen := false
+	for _, p := range providers {
+		if resolveFamily(resolve, p) != "pi" || piSeen {
+			continue
+		}
+		piSeen = true
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("pi hooks merge: user home: %w", err)
+		}
+		userPi := filepath.Join(home, ".pi")
+		if err := mergeUserPiIntoWorkDir(fs, userPi, workDir); err != nil {
+			return fmt.Errorf("pi hooks merge: %w", err)
+		}
+		return nil
 	}
 	return nil
 }

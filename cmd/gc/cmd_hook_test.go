@@ -955,3 +955,117 @@ work_query = "echo work"
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 }
+
+func TestHookResetAllAgentsTwoPiAgents(t *testing.T) {
+	clearGCEnv(t)
+	cityDir := t.TempDir()
+	// work_dir values are resolved relative to the city root for simple paths
+	// (including rig-scoped agents unless work_dir uses rig-root placeholders).
+	wkA := filepath.Join(cityDir, "wk-a")
+	wkB := filepath.Join(cityDir, "wk-b")
+	for _, d := range []string{
+		filepath.Join(cityDir, ".gc"),
+		filepath.Join(wkA, ".pi", "extensions"),
+		filepath.Join(wkB, ".pi", "extensions"),
+	} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, p := range []struct {
+		path string
+		data string
+	}{
+		{filepath.Join(wkA, ".pi", "extensions", "gc-hooks.js"), `stale-a`},
+		{filepath.Join(wkB, ".pi", "extensions", "gc-hooks.js"), `stale-b`},
+	} {
+		if err := os.WriteFile(p.path, []byte(p.data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rigRoot := filepath.Join(cityDir, "rigs", "demo")
+	if err := os.MkdirAll(rigRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cityToml := `[workspace]
+name = "test-city"
+
+[[rig]]
+name = "demo"
+path = "rigs/demo"
+
+[[agent]]
+name = "alpha"
+work_query = "true"
+work_dir = "wk-a"
+install_agent_hooks = ["pi"]
+
+[[agent]]
+name = "beta"
+dir = "demo"
+work_query = "true"
+work_dir = "wk-b"
+install_agent_hooks = ["pi"]
+`
+	if err := os.WriteFile(filepath.Join(cityDir, "city.toml"), []byte(cityToml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GC_CITY", cityDir)
+	var stdout, stderr bytes.Buffer
+	cmd := newHookCmd(&stdout, &stderr)
+	cmd.SetArgs([]string{"reset", "--all-agents"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("gc hook reset --all-agents: %v; stderr=%s", err, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "alpha") || !strings.Contains(out, "beta") {
+		t.Fatalf("stdout should mention both agents:\n%s", out)
+	}
+	for _, label := range []struct {
+		dir string
+	}{
+		{wkA},
+		{wkB},
+	} {
+		data, err := os.ReadFile(filepath.Join(label.dir, ".pi", "extensions", "gc-hooks.js"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := string(data)
+		if !strings.Contains(s, "Gas City hooks for Pi Coding Agent") {
+			t.Fatalf("expected embedded Pi overlay in %s, got:\n%s", label.dir, s)
+		}
+	}
+}
+
+func TestHookResetAllAgentsRejectsPositional(t *testing.T) {
+	clearGCEnv(t)
+	cityDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cityDir, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cityToml := `[workspace]
+name = "test-city"
+
+[[agent]]
+name = "worker"
+work_query = "true"
+work_dir = "."
+install_agent_hooks = ["pi"]
+`
+	if err := os.WriteFile(filepath.Join(cityDir, "city.toml"), []byte(cityToml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GC_CITY", cityDir)
+	var stdout, stderr bytes.Buffer
+	cmd := newHookCmd(&stdout, &stderr)
+	cmd.SetArgs([]string{"reset", "--all-agents", "worker"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when passing agent name with --all-agents")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "do not pass an agent name") {
+		t.Fatalf("error = %q; stderr = %q", msg, stderr.String())
+	}
+}
